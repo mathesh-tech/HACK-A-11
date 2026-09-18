@@ -53,13 +53,25 @@ def process_query():
 
         routing_time_ms = round((time.time() - t_start) * 1000, 2)
 
-        # 6 & 7. Call LLM Client
+        # 6 & 7. Call LLM Client with Fallback Logic
         gen_start = time.time()
+        fallback_used = False
+        error_msg = None
+        
         try:
             if selected_model == "tinyllama":
                 model_response = ollama_client.query_tinyllama(query)
             else:
                 model_response = gemini_client.query_gemini(query)
+                
+                # Check if Gemini failed (after its internal retries)
+                if model_response and model_response.get("source") == "gemini-error":
+                    logging.warning("Gemini failed after retries. Falling back to TinyLlama.")
+                    fallback_used = True
+                    error_msg = model_response.get("text", "Gemini failed")
+                    # Fallback to TinyLlama
+                    selected_model = "tinyllama"
+                    model_response = ollama_client.query_tinyllama(query)
                 
             # Handle potential failure response format from clients
             if not model_response or ("response" not in model_response and "text" not in model_response):
@@ -124,6 +136,8 @@ def process_query():
             "difficulty": analysis["difficulty"],
             "score": analysis["score"],
             "model_used": selected_model,
+            "fallback_used": fallback_used,
+            "error": error_msg,
             "routing_reason": transparency_info["routing_reason"],
             "cost_analysis": {
                 "actual_cost": cost_info.get("actual_cost", 0),
