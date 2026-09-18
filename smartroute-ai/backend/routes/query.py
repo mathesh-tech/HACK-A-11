@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify
 from analyzer import ComplexityAnalyzer
 from router import RoutingEngine
 from cost_engine import CostEngine
-from transparency import TransparencyEngine
+from transparency import generate_transparency
 import ollama_client
 import gemini_client
 import models
@@ -17,7 +17,6 @@ from . import query_bp
 analyzer = ComplexityAnalyzer()
 router_engine = RoutingEngine()
 cost_engine = CostEngine()
-transparency_engine = TransparencyEngine()
 
 @query_bp.route("/api/chat", methods=["POST"])
 def chat():
@@ -54,10 +53,10 @@ def chat():
     cost_info = cost_engine.calculate_cost(routing["selected_model"])
 
     # MODULE 6 - Transparency Engine
-    transparency_info = transparency_engine.explain(
+    transparency_info = generate_transparency(
         difficulty=analysis["difficulty"],
         score=analysis["score"],
-        model=routing["selected_model"]
+        selected_model=routing["selected_model"]
     )
 
     record = {
