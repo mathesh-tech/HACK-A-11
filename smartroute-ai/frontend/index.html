@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SmartRoute AI — Right Model. Right Cost.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', sans-serif; background:#f7f8fa; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #d8dbe0; border-radius: 8px; }
+  .chat-scroll { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API_BASE = "http://localhost:5000/api";
+
+const MODEL_LABEL = { tinyllama: "TinyLlama", gemini: "Gemini 2.5 Flash" };
+const DIFFICULTY_COLOR = {
+  Easy: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  Medium: "bg-amber-100 text-amber-700 border-amber-200",
+  Hard: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+function Card({ children, className = "" }) {
+  return (
+    <div className={"bg-white rounded-2xl border border-slate-200 shadow-sm " + className}>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, className = "" }) {
+  return (
+    <div className={"bg-white rounded-xl border border-slate-200 p-3 " + className}>
+      <div className="text-[11px] uppercase tracking-wide text-slate-400 font-medium">{label}</div>
+      <div className="text-xl font-bold text-slate-800 mt-0.5">{value}</div>
+      {sub && <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function PipelineStage({ label, active, done }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className={"w-2.5 h-2.5 rounded-full flex-shrink-0 " + (done ? "bg-slate-900" : active ? "bg-indigo-500" : "bg-slate-200")}
+        style={{ transform: active ? "scale(1.15)" : "scale(1)" }}
+      />
+      <span className={"text-xs " + (active ? "text-indigo-600 font-semibold" : done ? "text-slate-700" : "text-slate-400")}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function VisualPipeline({ stage }) {
+  const stages = ["Query Received", "Complexity Analysis", "Difficulty Scoring", "Model Selection", "Response Generated"];
+  const idx = stages.indexOf(stage);
+  return (
+    <Card className="p-4">
+      <div className="text-sm font-semibold text-slate-700 mb-3">Live Routing Pipeline</div>
+      <div className="flex flex-col gap-2.5">
+        {stages.map((s, i) => (
+          <PipelineStage key={s} label={s} active={i === idx} done={idx > i} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function TransparencyPanel({ result }) {
+  if (!result) {
+    return (
+      <Card className="p-4">
+        <div className="text-sm font-semibold text-slate-700 mb-1">Routing Transparency</div>
+        <div className="text-xs text-slate-400">Send a message to see how it gets routed.</div>
+      </Card>
+    );
+  }
+  const { analysis, routing, cost, timing } = result;
+  return (
+    <Card className="p-4">
+      <div className="text-sm font-semibold text-slate-700 mb-3">Routing Transparency</div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className={"px-2 py-0.5 rounded-full text-[11px] font-semibold border " + DIFFICULTY_COLOR[analysis.difficulty]}>
+          {analysis.difficulty}
+        </span>
+        <span className="text-xs text-slate-500">Score {analysis.score}/10</span>
+        <span className="text-xs text-slate-400">· {analysis.confidence}% confidence</span>
+      </div>
+      <div className="text-xs text-slate-600 mb-3 leading-relaxed">{result.transparency.routing_reason}</div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="bg-slate-50 rounded-lg p-2">
+          <div className="text-slate-400">Selected Model</div>
+          <div className="font-semibold text-slate-700">{MODEL_LABEL[routing.selected_model]}</div>
+        </div>
+        <div className="bg-slate-50 rounded-lg p-2">
+          <div className="text-slate-400">Routing Time</div>
+          <div className="font-semibold text-slate-700">{timing.routing_time_ms} ms</div>
+        </div>
+        <div className="bg-slate-50 rounded-lg p-2">
+          <div className="text-slate-400">Actual Cost</div>
+          <div className="font-semibold text-slate-700">₹{cost.actual_cost.toFixed(4)}</div>
+        </div>
+        <div className="bg-slate-50 rounded-lg p-2">
+          <div className="text-slate-400">GPT Baseline</div>
+          <div className="font-semibold text-slate-700">₹{cost.baseline_cost.toFixed(4)}</div>
+        </div>
+      </div>
+      <div className="mt-3">
+        <div className="flex justify-between text-xs text-slate-500 mb-1">
+          <span>Cost Savings</span><span className="font-semibold text-emerald-600">{cost.savings_pct}%</span>
+        </div>
+        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-emerald-500 transition-all duration-700 ease-out"
+            style={{ width: `${cost.savings_pct}%` }}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ComparisonPanel({ stats }) {
+  if (!stats || stats.total_queries === 0) {
+    return (
+      <Card className="p-4">
+        <div className="text-sm font-semibold text-slate-700 mb-1">Without vs With Smart Routing</div>
+        <div className="text-xs text-slate-400">Run a few queries to populate this comparison.</div>
+      </Card>
+    );
+  }
+  const withoutCost = stats.total_baseline_cost;
+  const withCost = stats.total_actual_cost;
+  const savingsPct = withoutCost > 0 ? Math.round(((withoutCost - withCost) / withoutCost) * 100) : 0;
+  return (
+    <Card className="p-4">
+      <div className="text-sm font-semibold text-slate-700 mb-3">Without vs With Smart Routing</div>
+      <div className="space-y-2">
+        <div>
+          <div className="flex justify-between text-xs text-slate-500"><span>Every query → GPT-class model</span><span>₹{withoutCost.toFixed(3)}</span></div>
+          <div className="w-full h-2.5 bg-slate-100 rounded-full mt-1"><div className="h-full bg-slate-400 rounded-full" style={{width: "100%"}}/></div>
+        </div>
+        <div>
+          <div className="flex justify-between text-xs text-slate-500"><span>With SmartRoute AI</span><span>₹{withCost.toFixed(3)}</span></div>
+          <div className="w-full h-2.5 bg-slate-100 rounded-full mt-1">
+            <div className="h-full bg-indigo-500 rounded-full transition-all duration-700 ease-out"
+              style={{ width: withoutCost>0 ? `${(withCost/withoutCost)*100}%` : "0%" }} />
+          </div>
+        </div>
+      </div>
+      <div className="text-xs text-slate-500 mt-3">
+        TinyLlama {stats.model_usage_pct.tinyllama}% · Gemini {stats.model_usage_pct.gemini}%
+      </div>
+      <div className="mt-2 text-emerald-600 font-bold text-lg">{savingsPct}% saved overall</div>
+    </Card>
+  );
+}
+
+function AdminDashboard({ stats }) {
+  if (!stats) return null;
+  return (
+    <Card className="p-4">
+      <div className="text-sm font-semibold text-slate-700 mb-3">Admin Dashboard</div>
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Total Queries" value={stats.total_queries} />
+        <StatCard label="Most Used Model" value={stats.most_used_model ? MODEL_LABEL[stats.most_used_model] : "—"} />
+        <StatCard label="Easy" value={stats.easy_queries} />
+        <StatCard label="Medium" value={stats.medium_queries} />
+        <StatCard label="Hard" value={stats.hard_queries} />
+        <StatCard label="Avg Response" value={stats.average_response_time_ms + " ms"} />
+        <StatCard label="Total Savings" value={"₹" + stats.total_savings} className="col-span-2" />
+      </div>
+    </Card>
+  );
+}
+
+function SavingsMeter({ stats }) {
+  const pct = stats && stats.total_baseline_cost > 0
+    ? Math.round(((stats.total_baseline_cost - stats.total_actual_cost) / stats.total_baseline_cost) * 100)
+    : 0;
+  return (
+    <Card className="p-4">
+      <div className="flex justify-between items-center mb-2">
+        <span className="text-sm font-semibold text-slate-700">AI Cost Savings Meter</span>
+        <span className="text-sm font-bold text-emerald-600">{pct}%</span>
+      </div>
+      <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 rounded-full transition-all duration-700 ease-out"
+          style={{ width: pct + "%" }} />
+      </div>
+    </Card>
+  );
+}
+
+function ChatBubble({ role, content, meta }) {
+  const isUser = role === "user";
+  return (
+    <div
+      className={"flex " + (isUser ? "justify-end" : "justify-start")}
+      style={{ opacity: 1, transform: "translateY(0)" }}
+    >
+      <div className={"max-w-[75%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed " +
+        (isUser ? "bg-slate-900 text-white rounded-br-sm" : "bg-white border border-slate-200 text-slate-700 rounded-bl-sm")}>
+        <div className="whitespace-pre-wrap">{content}</div>
+        {meta && (
+          <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-2 text-[11px] text-slate-400">
+            <span className={"px-1.5 py-0.5 rounded-full border " + DIFFICULTY_COLOR[meta.difficulty]}>{meta.difficulty}</span>
+            <span>routed to {MODEL_LABEL[meta.model]}</span>
+            <span>· ₹{meta.cost.toFixed(4)}</span>
+            <span>· {meta.savings}% saved</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "Hi! I'm SmartRoute AI. Ask me anything — I'll pick the cheapest model that can still give you a great answer." }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [override, setOverride] = useState("auto");
+  const [stage, setStage] = useState(null);
+  const [lastResult, setLastResult] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [connectionError, setConnectionError] = useState(false);
+  const scrollRef = useRef(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/stats`);
+      const data = await res.json();
+      setStats(data);
+      setConnectionError(false);
+    } catch (e) {
+      setConnectionError(true);
+    }
+  }, []);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const send = async () => {
+    const query = input.trim();
+    if (!query || loading) return;
+    setMessages(m => [...m, { role: "user", content: query }]);
+    setInput("");
+    setLoading(true);
+    setStage("Query Received");
+
+    // Animate through pipeline stages while we wait for the real call
+    const stageTimers = [
+      setTimeout(() => setStage("Complexity Analysis"), 250),
+      setTimeout(() => setStage("Difficulty Scoring"), 550),
+      setTimeout(() => setStage("Model Selection"), 850),
+    ];
+
+    try {
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, override }),
+      });
+      if (!res.ok) throw new Error("backend error");
+      const data = await res.json();
+      setStage("Response Generated");
+      setLastResult(data);
+      setMessages(m => [...m, {
+        role: "assistant",
+        content: data.response,
+        meta: { difficulty: data.analysis.difficulty, model: data.routing.selected_model, cost: data.cost.actual_cost, savings: data.cost.savings_pct }
+      }]);
+      fetchStats();
+      setConnectionError(false);
+    } catch (e) {
+      setConnectionError(true);
+      setMessages(m => [...m, { role: "assistant", content: "⚠️ Couldn't reach the backend at " + API_BASE + ". Make sure `python app.py` is running in /backend." }]);
+    } finally {
+      stageTimers.forEach(clearTimeout);
+      setLoading(false);
+      setTimeout(() => setStage(null), 1200);
+    }
+  };
+
+  return (
+    <div className="min-h-screen">
+      <header className="border-b border-slate-200 bg-white px-6 py-3.5 flex items-center justify-between sticky top-0 z-10">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white font-bold text-sm">SR</div>
+          <div>
+            <div className="font-bold text-slate-800 leading-tight">SmartRoute AI</div>
+            <div className="text-[11px] text-slate-400 leading-tight">Right Model. Right Cost.</div>
+          </div>
+        </div>
+        {connectionError && (
+          <div className="text-xs text-rose-500 bg-rose-50 border border-rose-200 rounded-full px-3 py-1">
+            Backend not connected — run the Flask server
+          </div>
+        )}
+      </header>
+
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4 p-4">
+        {/* LEFT: Routing Dashboard */}
+        <div className="space-y-4 order-2 lg:order-1">
+          <VisualPipeline stage={stage} />
+          <TransparencyPanel result={lastResult} />
+          <SavingsMeter stats={stats} />
+          <ComparisonPanel stats={stats} />
+          <AdminDashboard stats={stats} />
+        </div>
+
+        {/* RIGHT: Chat Interface */}
+        <Card className="order-1 lg:order-2 flex flex-col h-[calc(100vh-96px)]">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <div className="text-sm font-semibold text-slate-700">Chat</div>
+            <div className="flex items-center gap-1 bg-slate-100 rounded-full p-1">
+              {["auto", "tinyllama", "gemini"].map(mode => (
+                <button key={mode} onClick={() => setOverride(mode)}
+                  className={"text-xs px-3 py-1 rounded-full transition " +
+                    (override === mode ? "bg-white shadow text-slate-800 font-semibold" : "text-slate-500")}>
+                  {mode === "auto" ? "Auto Routing" : mode === "tinyllama" ? "Force TinyLlama" : "Force Gemini"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll px-4 py-4 space-y-3">
+            {messages.map((m, i) => <ChatBubble key={i} role={m.role} content={m.content} meta={m.meta} />)}
+            {loading && (
+              <div className="flex items-center gap-1.5 text-slate-400 text-xs pl-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse"/>
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: "0.2s" }}/>
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: "0.4s" }}/>
+                <span className="ml-1">{stage || "thinking"}...</span>
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-slate-100 flex gap-2">
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && send()}
+              placeholder="Ask anything — try a simple question, then a system design one..."
+              className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-slate-400"
+            />
+            <button onClick={send} disabled={loading}
+              className="bg-slate-900 text-white text-sm font-semibold px-5 py-2.5 rounded-xl disabled:opacity-40">
+              Send
+            </button>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
